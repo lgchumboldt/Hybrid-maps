@@ -1,0 +1,78 @@
+library(raster)
+library(rgeos)
+library(maptools)
+library(igraph)
+library(parallel)
+
+setwd("~/Desktop/PC IAvH/Aves/Mapas_Aves/Birdlife Mapas Oct 2014")
+
+#####Cargar datos
+datos<-read.delim("~/Google Drive/IAVH/Alturas_524Sp.txt",header=T) ### Archivo donde están las alturas
+conversion<-read.delim("~/Google Drive/IAVH/Proyectos/Mapas Diversidad/Tablas_Modif/sinonimias_aves.txt",header=T) ### Archivo de conversión de nombres
+#modelos<-list.files("~/Desktop/PC IAvH/Aves/Mapas_Aves/Biomodelos_Octubre_2014/Cortados por Colombia",pattern="10_cut.asc")
+modelos<-as.character(datos$especies)
+shapes<-list.files("~/Desktop/PC IAvH/Aves/Mapas_Aves/Birdlife Mapas Oct 2014",pattern="shp")
+
+paramo=readShapePoly("~/Dropbox/IAVH/Proyectos/Mapas Diversidad/Códigos y Datos/Shapes_paramos_Col/Complejos_100k_2012.shp")
+
+#####Definir plantilla. Preferiblemente raster de altura a la extensión y resolución de trabajo.
+plantilla<-raster("~/Desktop/PC IAvH/alt1/w001001.adf")
+
+
+Hibridos<-function(x)
+{
+nombreModelo <- conversion[which(conversion$TipLabel==x),9]
+if(is.na(nombreModelo)==TRUE)
+{
+  rPrueba <-NULL
+}
+if(is.na(nombreModelo)!=TRUE)
+{
+  model=raster(paste("~/Desktop/PC IAvH/Aves/Mapas_Aves/Biomodelos_Octubre_2014/Cortados por Colombia/",nombreModelo,sep=""))
+  if(length(which(values(model)==1))==0)
+  {
+    rPrueba=NULL
+  }
+  if(length(which(values(model)==1))!=0)
+  {
+    w=conversion[which(conversion$name_modelo==nombreModelo),5]
+    if(length(w)!=0 && !is.na(w))
+    {
+      shape=readShapePoly(as.character(w))
+      sh=rasterize(shape,plantilla,field=1)
+      coordenadas=coordinates(sh)[!is.na(values(sh)),]
+      groups=clump(model,directions=8)
+      extShape=extract(groups,coordenadas)
+      vShP=unique(extShape)  
+      sec=seq(1,length(unique(na.omit(values(groups)))))
+      m=sec[which(!is.na(match(sec,vShP)))]
+      d=data.frame(m,replace=rep(1,length(m)))
+      rPrueba=subs(groups,d,by="m",which="replace",subsWithNA=T)
+      names(rPrueba)<-x	
+      rPrueba <- mask(rPrueba,paramo)
+      writeRaster(rPrueba,file=paste(x,"_Hb_NoAlt.tif",sep=""),format="GTiff",overwrite=TRUE)
+      rPrueba[which(values(plantilla)<datos[which(datos$especies==x),3])]<-0
+      rPrueba[which(values(plantilla)>datos[which(datos$especies==x),4])]<-0
+      rPrueba[rPrueba==0]<-NA
+      writeRaster(rPrueba,file=paste(x,"_Hb.tif",sep=""),format="GTiff",overwrite=TRUE)
+    }
+    if(length(w)==0 || is.na(w))
+    {
+      rPrueba <- mask(model,paramo)
+      writeRaster(rPrueba,file=paste(x,"_Hb_NoAlt.tif",sep=""),format="GTiff",overwrite=TRUE)
+      rPrueba[which(values(plantilla)<datos[which(datos$especies==x),3])]<-0
+      rPrueba[which(values(plantilla)>datos[which(datos$especies==x),4])]<-0
+      rPrueba[rPrueba==0]<-NA
+      writeRaster(rPrueba,file=paste(x,"_Hb.tif",sep=""),format="GTiff",overwrite=TRUE)
+    }
+  }
+}
+  return(rPrueba)
+}
+
+
+
+hib=lapply(modelos2[2:41], Hibridos)
+
+hib=mclapply(modelos,Hibridos,mc.cores=20)
+
